@@ -1,4 +1,4 @@
-# chia-blockchain
+# chia-blockchain-dennis
 
 ![Alt text](https://www.chia.net/img/chia_logo.svg)
 

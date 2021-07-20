@@ -22,9 +22,7 @@ RUN dpkg-reconfigure -f noninteractive tzdata
 RUN echo "cloning main"
 
 RUN cd chia-blockchain \
-&& git fetch --tags \
-&& tag=$(git describe --tags `git rev-list --tags --max-count=1`) \
-&& git checkout $tag -b latest \
+&& git checkout latest \
 && git submodule update --init mozilla-ca \
 && chmod +x install.sh \
 && /usr/bin/sh ./install.sh

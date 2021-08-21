@@ -21,7 +21,7 @@ RUN dpkg-reconfigure -f noninteractive tzdata
 
 RUN echo "cloning main"
 
-RUN cd chia-blockchain
+RUN cd /chia-blockchain
 RUN git checkout latest
 RUN git submodule update --init mozilla-ca
 RUN chmod +x install.sh

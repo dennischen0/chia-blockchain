@@ -21,11 +21,11 @@ RUN dpkg-reconfigure -f noninteractive tzdata
 
 RUN echo "cloning main"
 
-RUN cd chia-blockchain \
-&& git checkout latest \
-&& git submodule update --init mozilla-ca \
-&& chmod +x install.sh \
-&& /usr/bin/sh ./install.sh
+RUN cd chia-blockchain
+RUN git checkout latest
+RUN git submodule update --init mozilla-ca
+RUN chmod +x install.sh
+RUN /usr/bin/sh ./install.sh
 
 ENV PATH=/chia-blockchain/venv/bin/:$PATH
 WORKDIR /chia-blockchain

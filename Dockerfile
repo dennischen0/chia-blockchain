@@ -22,14 +22,14 @@ RUN dpkg-reconfigure -f noninteractive tzdata
 RUN echo "cloning main"
 
 RUN git clone --branch main https://github.com/Chia-Network/chia-blockchain.git 
-RUN cd chia-blockchain
+
+WORKDIR /chia-blockchain
 RUN git checkout latest
 RUN git submodule update --init mozilla-ca
 RUN chmod +x install.sh
 RUN /usr/bin/sh ./install.sh
 
 ENV PATH=/chia-blockchain/venv/bin/:$PATH
-WORKDIR /chia-blockchain
 ADD ./entrypoint.sh entrypoint.sh
 
 ENTRYPOINT ["bash", "./entrypoint.sh"]

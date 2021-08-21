@@ -21,6 +21,10 @@ RUN dpkg-reconfigure -f noninteractive tzdata
 
 RUN echo "cloning main"
 
+RUN echo "sadfj;lksfda;lkjsdfajlasdfkljasdfl"
+RUN ls ./
+RUN echo "sadfj;lksfda;lkjsdfajlasdfkljasdfl"
+RUN ls /
 RUN cd /chia-blockchain
 RUN git checkout latest
 RUN git submodule update --init mozilla-ca

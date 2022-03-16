@@ -1,12 +1,12 @@
 import asyncio
 import json
 import ssl
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import websockets
 
-from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.util.config import load_config
 from chia.util.json_util import dict_to_json_str
 from chia.util.ws_message import WsRpcMessage, create_payload_dict
@@ -15,8 +15,8 @@ from chia.util.ws_message import WsRpcMessage, create_payload_dict
 class DaemonProxy:
     def __init__(self, uri: str, ssl_context: Optional[ssl.SSLContext]):
         self._uri = uri
-        self._request_dict: Dict[bytes32, asyncio.Event] = {}
-        self.response_dict: Dict[bytes32, Any] = {}
+        self._request_dict: Dict[str, asyncio.Event] = {}
+        self.response_dict: Dict[str, Any] = {}
         self.ssl_context = ssl_context
 
     def format_request(self, command: str, data: Dict[str, Any]) -> WsRpcMessage:
@@ -36,9 +36,8 @@ class DaemonProxy:
                 id = decoded["request_id"]
 
                 if id in self._request_dict:
-                    if id in self._request_dict:
-                        self.response_dict[id] = decoded
-                        self._request_dict[id].set()
+                    self.response_dict[id] = decoded
+                    self._request_dict[id].set()
 
         asyncio.create_task(listener())
         await asyncio.sleep(1)
@@ -64,6 +63,12 @@ class DaemonProxy:
             response = None
         self._request_dict.pop(request_id)
 
+        return response
+
+    async def get_version(self) -> WsRpcMessage:
+        data: Dict[str, Any] = {}
+        request = self.format_request("get_version", data)
+        response = await self._get(request)
         return response
 
     async def start_service(self, service_name: str) -> WsRpcMessage:
@@ -98,6 +103,12 @@ class DaemonProxy:
         data = {"key": passphrase}
         request = self.format_request("unlock_keyring", data)
         response = await self._get(request)
+        return response
+
+    async def notify_keyring_migration_completed(self, passphrase: Optional[str]) -> WsRpcMessage:
+        data: Dict[str, Any] = {"key": passphrase}
+        request: WsRpcMessage = self.format_request("notify_keyring_migration_completed", data)
+        response: WsRpcMessage = await self._get(request)
         return response
 
     async def ping(self) -> WsRpcMessage:
@@ -147,3 +158,24 @@ async def connect_to_daemon_and_validate(root_path: Path, quiet: bool = False) -
             print("Daemon not started yet")
         return None
     return None
+
+
+@asynccontextmanager
+async def acquire_connection_to_daemon(root_path: Path, quiet: bool = False):
+    """
+    Asynchronous context manager which attempts to create a connection to the daemon.
+    The connection object (DaemonProxy) is yielded to the caller. After the caller's
+    block exits scope, execution resumes in this function, wherein the connection is
+    closed.
+    """
+    from chia.daemon.client import connect_to_daemon_and_validate
+
+    daemon: Optional[DaemonProxy] = None
+    try:
+        daemon = await connect_to_daemon_and_validate(root_path, quiet=quiet)
+        yield daemon  # <----
+    except Exception as e:
+        print(f"Exception occurred while communicating with the daemon: {e}")
+
+    if daemon is not None:
+        await daemon.close()

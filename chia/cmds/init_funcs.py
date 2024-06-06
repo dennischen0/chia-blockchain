@@ -1,30 +1,28 @@
+from __future__ import annotations
+
 import os
 import shutil
+import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import yaml
 
-from chia import __version__
+from chia.cmds.configure import configure
 from chia.consensus.coinbase import create_puzzlehash_for_pk
-from chia.ssl.create_ssl import (
-    ensure_ssl_dirs,
-    generate_ca_signed_cert,
-    get_chia_ca_crt_key,
-    make_ca_cert,
-    write_ssl_cert_and_key,
-)
+from chia.ssl.create_ssl import create_all_ssl
 from chia.util.bech32m import encode_puzzle_hash
 from chia.util.config import (
     create_default_chia_config,
     initial_config_file,
     load_config,
+    lock_and_load_config,
     save_config,
     unflatten_properties,
-    get_config_lock,
 )
+from chia.util.db_version import set_db_version
 from chia.util.keychain import Keychain
-from chia.util.path import mkdir, path_from_root
+from chia.util.path import path_from_root
 from chia.util.ssl_check import (
     DEFAULT_PERMISSIONS_CERT_FILE,
     DEFAULT_PERMISSIONS_KEY_FILE,
@@ -34,19 +32,15 @@ from chia.util.ssl_check import (
     fix_ssl,
 )
 from chia.wallet.derive_keys import (
+    _derive_path,
+    _derive_path_unhardened,
     master_sk_to_pool_sk,
     master_sk_to_wallet_sk_intermediate,
     master_sk_to_wallet_sk_unhardened_intermediate,
-    _derive_path,
-    _derive_path_unhardened,
 )
-from chia.cmds.configure import configure
-
-private_node_names = {"full_node", "wallet", "farmer", "harvester", "timelord", "crawler", "daemon"}
-public_node_names = {"full_node", "wallet", "farmer", "introducer", "timelord"}
 
 
-def dict_add_new_default(updated: Dict, default: Dict, do_not_migrate_keys: Dict[str, Any]):
+def dict_add_new_default(updated: Dict[str, Any], default: Dict[str, Any], do_not_migrate_keys: Dict[str, Any]) -> None:
     for k in do_not_migrate_keys:
         if k in updated and do_not_migrate_keys[k] == "":
             updated.pop(k)
@@ -75,8 +69,7 @@ def check_keys(new_root: Path, keychain: Optional[Keychain] = None) -> None:
         print("No keys are present in the keychain. Generate them with 'chia keys generate'")
         return None
 
-    with get_config_lock(new_root, "config.yaml"):
-        config: Dict = load_config(new_root, "config.yaml", acquire_lock=False)
+    with lock_and_load_config(new_root, "config.yaml") as config:
         pool_child_pubkeys = [master_sk_to_pool_sk(sk).get_g1() for sk, _ in all_sks]
         all_targets = []
         stop_searching_for_farmer = "xch_target_address" not in config["farmer"]
@@ -151,7 +144,7 @@ def check_keys(new_root: Path, keychain: Optional[Keychain] = None) -> None:
             )
 
         # Set the pool pks in the farmer
-        pool_pubkeys_hex = set(bytes(pk).hex() for pk in pool_child_pubkeys)
+        pool_pubkeys_hex = {bytes(pk).hex() for pk in pool_child_pubkeys}
         if "pool_public_keys" in config["farmer"]:
             for pk_hex in config["farmer"]["pool_public_keys"]:
                 # Add original ones in config
@@ -161,10 +154,10 @@ def check_keys(new_root: Path, keychain: Optional[Keychain] = None) -> None:
         save_config(new_root, "config.yaml", config)
 
 
-def copy_files_rec(old_path: Path, new_path: Path):
+def copy_files_rec(old_path: Path, new_path: Path) -> None:
     if old_path.is_file():
         print(f"{new_path}")
-        mkdir(new_path.parent)
+        new_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(old_path, new_path)
     elif old_path.is_dir():
         for old_path_child in old_path.iterdir():
@@ -177,7 +170,7 @@ def migrate_from(
     new_root: Path,
     manifest: List[str],
     do_not_migrate_settings: List[str],
-):
+) -> int:
     """
     Copy all the files in "manifest" to the new config directory.
     """
@@ -197,10 +190,9 @@ def migrate_from(
 
     # update config yaml with new keys
 
-    with get_config_lock(new_root, "config.yaml"):
-        config: Dict = load_config(new_root, "config.yaml", acquire_lock=False)
+    with lock_and_load_config(new_root, "config.yaml") as config:
         config_str: str = initial_config_file("config.yaml")
-        default_config: Dict = yaml.safe_load(config_str)
+        default_config: Dict[str, Any] = yaml.safe_load(config_str)
         flattened_keys = unflatten_properties({k: "" for k in do_not_migrate_settings})
         dict_add_new_default(config, default_config, flattened_keys)
 
@@ -211,69 +203,7 @@ def migrate_from(
     return 1
 
 
-def create_all_ssl(root_path: Path):
-    # remove old key and crt
-    config_dir = root_path / "config"
-    old_key_path = config_dir / "trusted.key"
-    old_crt_path = config_dir / "trusted.crt"
-    if old_key_path.exists():
-        print(f"Old key not needed anymore, deleting {old_key_path}")
-        os.remove(old_key_path)
-    if old_crt_path.exists():
-        print(f"Old crt not needed anymore, deleting {old_crt_path}")
-        os.remove(old_crt_path)
-
-    ssl_dir = config_dir / "ssl"
-    ca_dir = ssl_dir / "ca"
-    ensure_ssl_dirs([ssl_dir, ca_dir])
-
-    private_ca_key_path = ca_dir / "private_ca.key"
-    private_ca_crt_path = ca_dir / "private_ca.crt"
-    chia_ca_crt, chia_ca_key = get_chia_ca_crt_key()
-    chia_ca_crt_path = ca_dir / "chia_ca.crt"
-    chia_ca_key_path = ca_dir / "chia_ca.key"
-    write_ssl_cert_and_key(chia_ca_crt_path, chia_ca_crt, chia_ca_key_path, chia_ca_key)
-
-    if not private_ca_key_path.exists() or not private_ca_crt_path.exists():
-        # Create private CA
-        print(f"Can't find private CA, creating a new one in {root_path} to generate TLS certificates")
-        make_ca_cert(private_ca_crt_path, private_ca_key_path)
-        # Create private certs for each node
-        ca_key = private_ca_key_path.read_bytes()
-        ca_crt = private_ca_crt_path.read_bytes()
-        generate_ssl_for_nodes(ssl_dir, ca_crt, ca_key, True)
-    else:
-        # This is entered when user copied over private CA
-        print(f"Found private CA in {root_path}, using it to generate TLS certificates")
-        ca_key = private_ca_key_path.read_bytes()
-        ca_crt = private_ca_crt_path.read_bytes()
-        generate_ssl_for_nodes(ssl_dir, ca_crt, ca_key, True)
-
-    chia_ca_crt, chia_ca_key = get_chia_ca_crt_key()
-    generate_ssl_for_nodes(ssl_dir, chia_ca_crt, chia_ca_key, False, overwrite=False)
-
-
-def generate_ssl_for_nodes(ssl_dir: Path, ca_crt: bytes, ca_key: bytes, private: bool, overwrite=True):
-    if private:
-        names = private_node_names
-    else:
-        names = public_node_names
-
-    for node_name in names:
-        node_dir = ssl_dir / node_name
-        ensure_ssl_dirs([node_dir])
-        if private:
-            prefix = "private"
-        else:
-            prefix = "public"
-        key_path = node_dir / f"{prefix}_{node_name}.key"
-        crt_path = node_dir / f"{prefix}_{node_name}.crt"
-        if key_path.exists() and crt_path.exists() and overwrite is False:
-            continue
-        generate_ca_signed_cert(ca_crt, ca_key, crt_path, key_path)
-
-
-def copy_cert_files(cert_path: Path, new_path: Path):
+def copy_cert_files(cert_path: Path, new_path: Path) -> None:
     for old_path_child in cert_path.glob("*.crt"):
         new_path_child = new_path / old_path_child.name
         copy_files_rec(old_path_child, new_path_child)
@@ -291,7 +221,7 @@ def init(
     fix_ssl_permissions: bool = False,
     testnet: bool = False,
     v1_db: bool = False,
-):
+) -> Optional[int]:
     if create_certs is not None:
         if root_path.exists():
             if os.path.isdir(create_certs):
@@ -324,64 +254,7 @@ def init(
     else:
         return chia_init(root_path, fix_ssl_permissions=fix_ssl_permissions, testnet=testnet, v1_db=v1_db)
 
-
-def chia_version_number() -> Tuple[str, str, str, str]:
-    scm_full_version = __version__
-    left_full_version = scm_full_version.split("+")
-
-    version = left_full_version[0].split(".")
-
-    scm_major_version = version[0]
-    scm_minor_version = version[1]
-    if len(version) > 2:
-        smc_patch_version = version[2]
-        patch_release_number = smc_patch_version
-    else:
-        smc_patch_version = ""
-
-    major_release_number = scm_major_version
-    minor_release_number = scm_minor_version
-    dev_release_number = ""
-
-    # If this is a beta dev release - get which beta it is
-    if "0b" in scm_minor_version:
-        original_minor_ver_list = scm_minor_version.split("0b")
-        major_release_number = str(1 - int(scm_major_version))  # decrement the major release for beta
-        minor_release_number = scm_major_version
-        patch_release_number = original_minor_ver_list[1]
-        if smc_patch_version and "dev" in smc_patch_version:
-            dev_release_number = "." + smc_patch_version
-    elif "0rc" in version[1]:
-        original_minor_ver_list = scm_minor_version.split("0rc")
-        major_release_number = str(1 - int(scm_major_version))  # decrement the major release for release candidate
-        minor_release_number = str(int(scm_major_version) + 1)  # RC is 0.2.1 for RC 1
-        patch_release_number = original_minor_ver_list[1]
-        if smc_patch_version and "dev" in smc_patch_version:
-            dev_release_number = "." + smc_patch_version
-    else:
-        major_release_number = scm_major_version
-        minor_release_number = scm_minor_version
-        patch_release_number = smc_patch_version
-        dev_release_number = ""
-
-    install_release_number = major_release_number + "." + minor_release_number
-    if len(patch_release_number) > 0:
-        install_release_number += "." + patch_release_number
-    if len(dev_release_number) > 0:
-        install_release_number += dev_release_number
-
-    return major_release_number, minor_release_number, patch_release_number, dev_release_number
-
-
-def chia_minor_release_number():
-    res = int(chia_version_number()[2])
-    print(f"Install release number: {res}")
-    return res
-
-
-def chia_full_version_str() -> str:
-    major, minor, patch, dev = chia_version_number()
-    return f"{major}.{minor}.{patch}{dev}"
+    return None
 
 
 def chia_init(
@@ -391,7 +264,7 @@ def chia_init(
     fix_ssl_permissions: bool = False,
     testnet: bool = False,
     v1_db: bool = False,
-):
+) -> int:
     """
     Standard first run initialization or migration steps. Handles config creation,
     generation of SSL certs, and setting target addresses (via check_keys).
@@ -400,12 +273,9 @@ def chia_init(
     protected Keychain. When launching the daemon from the GUI, we want the GUI to
     handle unlocking the keychain.
     """
-    if os.environ.get("CHIA_ROOT", None) is not None:
-        print(
-            f"warning, your CHIA_ROOT is set to {os.environ['CHIA_ROOT']}. "
-            f"Please unset the environment variable and run chia init again\n"
-            f"or manually migrate config.yaml"
-        )
+    chia_root = os.environ.get("CHIA_ROOT", None)
+    if chia_root is not None:
+        print(f"CHIA_ROOT is set to {chia_root}")
 
     print(f"Chia directory {root_path}")
     if root_path.is_dir() and Path(root_path / "config" / "config.yaml").exists():
@@ -461,26 +331,35 @@ def chia_init(
     if should_check_keys:
         check_keys(root_path)
 
-    config: Dict
+    config: Dict[str, Any]
 
+    db_path_replaced: str
     if v1_db:
-        with get_config_lock(root_path, "config.yaml"):
-            config = load_config(root_path, "config.yaml", acquire_lock=False)
+        with lock_and_load_config(root_path, "config.yaml") as config:
             db_pattern = config["full_node"]["database_path"]
             new_db_path = db_pattern.replace("_v2_", "_v1_")
             config["full_node"]["database_path"] = new_db_path
+            db_path_replaced = new_db_path.replace("CHALLENGE", config["selected_network"])
+            db_path = path_from_root(root_path, db_path_replaced)
+
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            with sqlite3.connect(db_path) as connection:
+                set_db_version(connection, 1)
+
             save_config(root_path, "config.yaml", config)
+
     else:
         config = load_config(root_path, "config.yaml")["full_node"]
-        db_path_replaced: str = config["database_path"].replace("CHALLENGE", config["selected_network"])
+        db_path_replaced = config["database_path"].replace("CHALLENGE", config["selected_network"])
         db_path = path_from_root(root_path, db_path_replaced)
-        mkdir(db_path.parent)
-        import sqlite3
-
-        with sqlite3.connect(db_path) as connection:
-            connection.execute("CREATE TABLE database_version(version int)")
-            connection.execute("INSERT INTO database_version VALUES (2)")
-            connection.commit()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            # create new v2 db file
+            with sqlite3.connect(db_path) as connection:
+                set_db_version(connection, 2)
+        except sqlite3.OperationalError:
+            # db already exists, so we're good
+            pass
 
     print("")
     print("To see your keys, run 'chia keys show --show-mnemonic-seed'")

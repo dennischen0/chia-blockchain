@@ -4,11 +4,14 @@
 # Converts to proper symver format so NPM doesn't complain
 # Adds the version info to the package.json file
 #
+from __future__ import annotations
+
 import json
 import os
-from os.path import exists
 import subprocess
-from pkg_resources import parse_version
+from os.path import exists
+
+from packaging.version import Version
 
 
 #
@@ -17,31 +20,31 @@ from pkg_resources import parse_version
 # Copyright (C) 2015-2018 CERN.
 #
 def make_semver(version_str: str) -> str:
-    v = parse_version(version_str)
-    major = v._version.release[0]
+    v = Version(version_str)
+    major = v.release[0]
     try:
-        minor = v._version.release[1]
+        minor = v.release[1]
     except IndexError:
         minor = 0
     try:
-        patch = v._version.release[2]
+        patch = v.release[2]
     except IndexError:
         patch = 0
 
     prerelease = []
-    if v._version.pre:
-        prerelease.append("".join(str(x) for x in v._version.pre))
-    if v._version.dev:
-        prerelease.append("".join(str(x) for x in v._version.dev))
+    if v.pre:
+        prerelease.append("".join(str(x) for x in v.pre))
+    if v.dev is not None:
+        prerelease.append(f"dev{v.dev}")
 
     local = v.local
 
-    version = "{0}.{1}.{2}".format(major, minor, patch)
+    version = f"{major}.{minor}.{patch}"
 
     if prerelease:
-        version += "-{0}".format(".".join(prerelease))
+        version += "-{}".format(".".join(prerelease))
     if local:
-        version += "+{0}".format(local)
+        version += f"+{local}"
 
     return version
 
@@ -64,7 +67,7 @@ def update_version(package_json_path: str):
     data["version"] = get_chia_version()
 
     with open(package_json_path, "w") as w:
-        json.dump(data, indent=4, fp=w)
+        json.dump(data, indent=2, fp=w)
 
 
 if __name__ == "__main__":

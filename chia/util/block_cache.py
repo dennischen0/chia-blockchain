@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from typing import Dict, List, Optional
 
@@ -14,9 +16,9 @@ class BlockCache(BlockchainInterface):
     def __init__(
         self,
         blocks: Dict[bytes32, BlockRecord],
-        headers: Dict[bytes32, HeaderBlock] = None,
-        height_to_hash: Dict[uint32, bytes32] = None,
-        sub_epoch_summaries: Dict[uint32, SubEpochSummary] = None,
+        headers: Optional[Dict[bytes32, HeaderBlock]] = None,
+        height_to_hash: Optional[Dict[uint32, bytes32]] = None,
+        sub_epoch_summaries: Optional[Dict[uint32, SubEpochSummary]] = None,
     ):
         if sub_epoch_summaries is None:
             sub_epoch_summaries = {}
@@ -35,11 +37,12 @@ class BlockCache(BlockchainInterface):
         return self._block_records[header_hash]
 
     def height_to_block_record(self, height: uint32, check_db: bool = False) -> BlockRecord:
-        header_hash = self.height_to_hash(height)
-        # TODO: address hint error and remove ignore
-        #       error: Argument 1 to "block_record" of "BlockCache" has incompatible type "Optional[bytes32]"; expected
-        #       "bytes32"  [arg-type]
-        return self.block_record(header_hash)  # type: ignore[arg-type]
+        # Precondition: height is < peak height
+
+        header_hash: Optional[bytes32] = self.height_to_hash(height)
+        assert header_hash is not None
+
+        return self.block_record(header_hash)
 
     def get_ses_heights(self) -> List[uint32]:
         return sorted(self._sub_epoch_summaries.keys())
@@ -54,6 +57,9 @@ class BlockCache(BlockchainInterface):
         return self._height_to_hash[height]
 
     def contains_block(self, header_hash: bytes32) -> bool:
+        return header_hash in self._block_records
+
+    async def contains_block_from_db(self, header_hash: bytes32) -> bool:
         return header_hash in self._block_records
 
     def contains_height(self, height: uint32) -> bool:
@@ -71,10 +77,16 @@ class BlockCache(BlockchainInterface):
     async def get_block_record_from_db(self, header_hash: bytes32) -> Optional[BlockRecord]:
         return self._block_records[header_hash]
 
-    def remove_block_record(self, header_hash: bytes32):
+    async def prev_block_hash(self, header_hashes: List[bytes32]) -> List[bytes32]:
+        ret = []
+        for h in header_hashes:
+            ret.append(self._block_records[h].prev_hash)
+        return ret
+
+    def remove_block_record(self, header_hash: bytes32) -> None:
         del self._block_records[header_hash]
 
-    def add_block_record(self, block: BlockRecord):
+    def add_block_record(self, block: BlockRecord) -> None:
         self._block_records[block.header_hash] = block
 
     async def get_header_blocks_in_range(
@@ -84,7 +96,7 @@ class BlockCache(BlockchainInterface):
 
     async def persist_sub_epoch_challenge_segments(
         self, sub_epoch_summary_hash: bytes32, segments: List[SubEpochChallengeSegment]
-    ):
+    ) -> None:
         self._sub_epoch_segments[sub_epoch_summary_hash] = SubEpochSegments(segments)
 
     async def get_sub_epoch_challenge_segments(

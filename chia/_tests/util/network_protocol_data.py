@@ -1,8 +1,25 @@
-# flake8: noqa
-
 from __future__ import annotations
 
-from chia_rs import G1Element, G2Element, RewardChainBlockUnfinished
+from chia_rs import (
+    ChallengeChainSubSlot,
+    Foliage,
+    FoliageBlockData,
+    FoliageTransactionBlock,
+    G1Element,
+    G2Element,
+    InfusedChallengeChainSubSlot,
+    PoolTarget,
+    RewardChainBlock,
+    RewardChainBlockUnfinished,
+    RewardChainSubSlot,
+    SubEpochChallengeSegment,
+    SubEpochData,
+    SubSlotData,
+    SubSlotProofs,
+    TransactionsInfo,
+)
+from chia_rs.sized_bytes import bytes32
+from chia_rs.sized_ints import int16, uint8, uint16, uint32, uint64, uint128
 
 from chia.protocols import (
     farmer_protocol,
@@ -16,18 +33,8 @@ from chia.protocols import (
 from chia.protocols.shared_protocol import Error
 from chia.types.blockchain_format.classgroup import ClassgroupElement
 from chia.types.blockchain_format.coin import Coin
-from chia.types.blockchain_format.foliage import Foliage, FoliageBlockData, FoliageTransactionBlock, TransactionsInfo
-from chia.types.blockchain_format.pool_target import PoolTarget
 from chia.types.blockchain_format.proof_of_space import ProofOfSpace
-from chia.types.blockchain_format.reward_chain_block import RewardChainBlock
 from chia.types.blockchain_format.serialized_program import SerializedProgram
-from chia.types.blockchain_format.sized_bytes import bytes32
-from chia.types.blockchain_format.slots import (
-    ChallengeChainSubSlot,
-    InfusedChallengeChainSubSlot,
-    RewardChainSubSlot,
-    SubSlotProofs,
-)
 from chia.types.blockchain_format.sub_epoch_summary import SubEpochSummary
 from chia.types.blockchain_format.vdf import VDFInfo, VDFProof
 from chia.types.coin_spend import CoinSpend
@@ -37,16 +44,15 @@ from chia.types.header_block import HeaderBlock
 from chia.types.peer_info import TimestampedPeerInfo
 from chia.types.spend_bundle import SpendBundle
 from chia.types.unfinished_block import UnfinishedBlock
-from chia.types.weight_proof import RecentChainData, SubEpochChallengeSegment, SubEpochData, SubSlotData, WeightProof
+from chia.types.weight_proof import RecentChainData, WeightProof
 from chia.util.errors import Err
-from chia.util.ints import int16, uint8, uint16, uint32, uint64, uint128
 
 # SHARED PROTOCOL
 error_without_data = Error(int16(Err.UNKNOWN.value), "Unknown", None)
 error_with_data = Error(int16(Err.UNKNOWN.value), "Unknown", b"extra data")
 
 
-### FARMER PROTOCOL
+# FARMER PROTOCOL
 new_signage_point = farmer_protocol.NewSignagePoint(
     bytes32(bytes.fromhex("34b2a753b0dc864e7218f8facf23ca0e2b636351df5289b76f5845d9a78b7026")),
     bytes32(bytes.fromhex("9dc8b9d685c79acdf8780d994416dfcfb118e0adc99769ecfa94e1f40aa5bbe5")),
@@ -142,7 +148,7 @@ signed_values = farmer_protocol.SignedValues(
 )
 
 
-### FULL NODE PROTOCOL.
+# FULL NODE PROTOCOL.
 new_peak = full_node_protocol.NewPeak(
     bytes32(bytes.fromhex("8a346e8dc02e9b44c0571caa74fd99f163d4c5d7deae9f8ddb00528721493f7a")),
     uint32(2653549198),
@@ -503,7 +509,7 @@ timestamped_peer_info = TimestampedPeerInfo("127.0.0.1", uint16(8444), uint64(10
 respond_peers = full_node_protocol.RespondPeers([timestamped_peer_info])
 
 
-## WALLET PROTOCOL
+# WALLET PROTOCOL
 request_puzzle_solution = wallet_protocol.RequestPuzzleSolution(
     bytes32(bytes.fromhex("6edddb46bd154f50566b49c95812e0f1131a0a7162630349fc8d1d696e463e47")),
     uint32(3905474497),
@@ -755,7 +761,7 @@ respond_cost_info = wallet_protocol.RespondCostInfo(
 )
 
 
-### HARVESTER PROTOCOL
+# HARVESTER PROTOCOL
 pool_difficulty = harvester_protocol.PoolDifficulty(
     uint64(14819251421858580996),
     uint64(12852879676624401630),
@@ -899,7 +905,7 @@ respond_plots = harvester_protocol.RespondPlots(
     ["str"],
 )
 
-### INTRODUCER PROTOCOL
+# INTRODUCER PROTOCOL
 request_peers_introducer = introducer_protocol.RequestPeersIntroducer()
 
 respond_peers_introducer = introducer_protocol.RespondPeersIntroducer(
@@ -913,7 +919,7 @@ respond_peers_introducer = introducer_protocol.RespondPeersIntroducer(
 )
 
 
-### POOL PROTOCOL
+# POOL PROTOCOL
 authentication_payload = pool_protocol.AuthenticationPayload(
     "method",
     bytes32(bytes.fromhex("0251e3b3a1aacc689091b6b085be7a8d319bd9d1a015faae969cb76d8a45607c")),
@@ -1002,7 +1008,7 @@ error_response = pool_protocol.ErrorResponse(
     "err",
 )
 
-### TIMELORD PROTOCOL
+# TIMELORD PROTOCOL
 sub_epoch_summary = SubEpochSummary(
     bytes32(bytes.fromhex("2d0550de416467e7b57e56e962c712b79bee29cae29c73cc908da5978fc9789e")),
     bytes32(bytes.fromhex("3d29f5a3fe067ce7edea76c9cebaf3a3afdebc0eb9fbd530f807f1a28ed2df6d")),

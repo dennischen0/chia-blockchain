@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+
+from chia_rs.sized_bytes import bytes32
+from chia_rs.sized_ints import uint64
 
 from chia.types.blockchain_format.coin import Coin as _Coin
 from chia.types.blockchain_format.program import Program
 from chia.types.blockchain_format.serialized_program import SerializedProgram
-from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.types.coin_spend import CoinSpend
-from chia.util.ints import uint64
 from chia.util.streamable import Streamable
 from chia.wallet.util.clvm_streamable import clvm_streamable
 
 # This file contains the base types for communication between a wallet and an offline transaction signer.
-# These types should be compliant with CHIP-TBD
+# These types should be compliant with CHIP-0028
 
 
 @clvm_streamable
@@ -58,7 +58,7 @@ class Spend(Streamable):
 @clvm_streamable
 @dataclass(frozen=True)
 class TransactionInfo(Streamable):
-    spends: List[Spend]
+    spends: list[Spend]
 
 
 @clvm_streamable
@@ -72,7 +72,7 @@ class SigningTarget(Streamable):
 @clvm_streamable
 @dataclass(frozen=True)
 class SumHint(Streamable):
-    fingerprints: List[bytes]
+    fingerprints: list[bytes]
     synthetic_offset: bytes
     final_pubkey: bytes
 
@@ -81,21 +81,21 @@ class SumHint(Streamable):
 @dataclass(frozen=True)
 class PathHint(Streamable):
     root_fingerprint: bytes
-    path: List[uint64]
+    path: list[uint64]
 
 
 @clvm_streamable
 @dataclass(frozen=True)
 class KeyHints(Streamable):
-    sum_hints: List[SumHint]
-    path_hints: List[PathHint]
+    sum_hints: list[SumHint]
+    path_hints: list[PathHint]
 
 
 @clvm_streamable
 @dataclass(frozen=True)
 class SigningInstructions(Streamable):
     key_hints: KeyHints
-    targets: List[SigningTarget]
+    targets: list[SigningTarget]
 
 
 @clvm_streamable
@@ -123,4 +123,4 @@ class Signature(Streamable):
 @dataclass(frozen=True)
 class SignedTransaction(Streamable):
     transaction_info: TransactionInfo
-    signatures: List[Signature]
+    signatures: list[Signature]

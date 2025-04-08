@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Optional
+
+from chia_rs.sized_bytes import bytes32
+from chia_rs.sized_ints import uint64
 
 from chia.types.blockchain_format.coin import Coin
 from chia.types.blockchain_format.program import Program
-from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.types.coin_spend import CoinSpend
-from chia.util.ints import uint64
 from chia.wallet.lineage_proof import LineageProof
 from chia.wallet.puzzle_drivers import PuzzleInfo, Solver
 from chia.wallet.puzzles.singleton_top_layer_v1_1 import (
@@ -39,7 +40,7 @@ class SingletonOuterPuzzle:
             assert launcher_id is not None
             launcher_ph = launcher_struct[1].atom
             assert launcher_ph is not None
-            constructor_dict: Dict[str, Any] = {
+            constructor_dict: dict[str, Any] = {
                 "type": "singleton",
                 "launcher_id": "0x" + launcher_id.hex(),
                 "launcher_ph": "0x" + launcher_ph.hex(),
@@ -91,7 +92,7 @@ class SingletonOuterPuzzle:
         also = constructor.also()
         if also is not None:
             inner_solution = self._solve(also, solver, inner_puzzle, inner_solution)
-        matched, curried_args = match_singleton_puzzle(uncurry_puzzle(parent_spend.puzzle_reveal.to_program()))
+        matched, curried_args = match_singleton_puzzle(uncurry_puzzle(parent_spend.puzzle_reveal))
         assert matched
         _, parent_inner_puzzle = curried_args
         return solution_for_singleton(

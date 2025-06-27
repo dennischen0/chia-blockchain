@@ -19,7 +19,6 @@ from chia_rs import (
 )
 from chia_rs.sized_bytes import bytes32
 from chia_rs.sized_ints import uint32, uint64
-from clvm.casts import int_to_bytes
 from clvm_tools import binutils
 from clvm_tools.binutils import assemble
 
@@ -72,6 +71,7 @@ from chia.types.fee_rate import FeeRate
 from chia.types.generator_types import BlockGenerator
 from chia.types.mempool_inclusion_status import MempoolInclusionStatus
 from chia.types.mempool_item import MempoolItem, UnspentLineageInfo
+from chia.util.casts import int_to_bytes
 from chia.util.errors import Err
 from chia.util.hash import std_hash
 from chia.util.recursive_replace import recursive_replace
@@ -1152,7 +1152,7 @@ class TestMempoolManager:
         assert sb1 is None
         assert status == MempoolInclusionStatus.FAILED
 
-        for i in range(0, 4):
+        for i in range(4):
             await full_node_1.farm_new_transaction_block(FarmNewBlockProtocol(bytes32(32 * b"0")))
 
         tx2: full_node_protocol.RespondTransaction = full_node_protocol.RespondTransaction(spend_bundle1)

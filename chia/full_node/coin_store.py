@@ -82,7 +82,7 @@ class CoinStore:
         height: uint32,
         timestamp: uint64,
         included_reward_coins: Collection[Coin],
-        tx_additions: Collection[Coin],
+        tx_additions: Collection[tuple[bytes32, Coin]],
         tx_removals: list[bytes32],
     ) -> None:
         """
@@ -91,17 +91,24 @@ class CoinStore:
 
         start = time.monotonic()
 
-        additions = []
+        db_values_to_insert = []
 
-        for coin in tx_additions:
-            record: CoinRecord = CoinRecord(
-                coin,
-                height,
-                uint32(0),
-                False,
-                timestamp,
+        for coin_id, coin in tx_additions:
+            db_values_to_insert.append(
+                (
+                    coin_id,
+                    # confirmed_index
+                    height,
+                    # spent_index
+                    0,
+                    # coinbase
+                    0,
+                    coin.puzzle_hash,
+                    coin.parent_coin_info,
+                    coin.amount.stream_to_bytes(),
+                    timestamp,
+                )
             )
-            additions.append(record)
 
         if height == 0:
             assert len(included_reward_coins) == 0
@@ -109,16 +116,24 @@ class CoinStore:
             assert len(included_reward_coins) >= 2
 
         for coin in included_reward_coins:
-            reward_coin_r: CoinRecord = CoinRecord(
-                coin,
-                height,
-                uint32(0),
-                True,
-                timestamp,
+            db_values_to_insert.append(
+                (
+                    coin.name(),
+                    # confirmed_index
+                    height,
+                    # spent_index
+                    0,
+                    # coinbase
+                    1,
+                    coin.puzzle_hash,
+                    coin.parent_coin_info,
+                    coin.amount.stream_to_bytes(),
+                    timestamp,
+                )
             )
-            additions.append(reward_coin_r)
 
-        await self._add_coin_records(additions)
+        async with self.db_wrapper.writer_maybe_transaction() as conn:
+            await conn.executemany("INSERT INTO coin_record VALUES(?, ?, ?, ?, ?, ?, ?, ?)", db_values_to_insert)
         await self._set_spent(tx_removals, height)
 
         end = time.monotonic()
@@ -201,23 +216,6 @@ class CoinStore:
                         coin_record = CoinRecord(coin, row[0], row[1], row[2], row[6])
                         coins.append(coin_record)
                 return coins
-
-    async def get_all_coins(self, include_spent_coins: bool) -> list[CoinRecord]:
-        # WARNING: this should only be used for testing or in a simulation,
-        # running it on a synced testnet or mainnet node will most likely result in an OOM error.
-        coins = set()
-
-        async with self.db_wrapper.reader_no_transaction() as conn:
-            async with conn.execute(
-                f"SELECT confirmed_index, spent_index, coinbase, puzzle_hash, "
-                f"coin_parent, amount, timestamp FROM coin_record "
-                f"{'' if include_spent_coins else 'INDEXED BY coin_spent_index WHERE spent_index=0'}"
-                f" ORDER BY confirmed_index"
-            ) as cursor:
-                for row in await cursor.fetchall():
-                    coin = self.row_to_coin(row)
-                    coins.add(CoinRecord(coin, row[0], row[1], row[2], row[6]))
-                return list(coins)
 
     # Checks DB and DiffStores for CoinRecords with puzzle_hash and returns them
     async def get_coin_records_by_puzzle_hash(
@@ -520,67 +518,44 @@ class CoinStore:
 
         return coin_states, next_height
 
-    async def rollback_to_block(self, block_index: int) -> list[CoinRecord]:
+    async def rollback_to_block(self, block_index: int) -> dict[bytes32, CoinRecord]:
         """
         Note that block_index can be negative, in which case everything is rolled back
-        Returns the list of coin records that have been modified
+        Returns a map of coin ID to coin record for modified items.
         """
 
         coin_changes: dict[bytes32, CoinRecord] = {}
         # Add coins that are confirmed in the reverted blocks to the list of updated coins.
         async with self.db_wrapper.writer_maybe_transaction() as conn:
-            async with conn.execute(
+            rows = await conn.execute_fetchall(
                 "SELECT confirmed_index, spent_index, coinbase, puzzle_hash, "
                 "coin_parent, amount, timestamp, coin_name FROM coin_record WHERE confirmed_index>?",
                 (block_index,),
-            ) as cursor:
-                for row in await cursor.fetchall():
-                    coin = self.row_to_coin(row)
-                    record = CoinRecord(coin, uint32(0), row[1], row[2], uint64(0))
-                    coin_name = bytes32(row[7])
-                    coin_changes[coin_name] = record
+            )
+            for row in rows:
+                coin = self.row_to_coin(row)
+                record = CoinRecord(coin, uint32(0), row[1], row[2], uint64(0))
+                coin_name = bytes32(row[7])
+                coin_changes[coin_name] = record
 
             # Delete reverted blocks from storage
             await conn.execute("DELETE FROM coin_record WHERE confirmed_index>?", (block_index,))
 
             # Add coins that are confirmed in the reverted blocks to the list of changed coins.
-            async with conn.execute(
+            rows = await conn.execute_fetchall(
                 "SELECT confirmed_index, spent_index, coinbase, puzzle_hash, "
                 "coin_parent, amount, timestamp, coin_name FROM coin_record WHERE spent_index>?",
                 (block_index,),
-            ) as cursor:
-                for row in await cursor.fetchall():
-                    coin = self.row_to_coin(row)
-                    record = CoinRecord(coin, row[0], uint32(0), row[2], row[6])
-                    coin_name = bytes32(row[7])
-                    if coin_name not in coin_changes:
-                        coin_changes[coin_name] = record
+            )
+            for row in rows:
+                coin = self.row_to_coin(row)
+                record = CoinRecord(coin, row[0], uint32(0), row[2], row[6])
+                coin_name = bytes32(row[7])
+                if coin_name not in coin_changes:
+                    coin_changes[coin_name] = record
 
             await conn.execute("UPDATE coin_record SET spent_index=0 WHERE spent_index>?", (block_index,))
-        return list(coin_changes.values())
-
-    # Store CoinRecord in DB
-    async def _add_coin_records(self, records: list[CoinRecord]) -> None:
-        values2 = []
-        for record in records:
-            values2.append(
-                (
-                    record.coin.name(),
-                    record.confirmed_block_index,
-                    record.spent_block_index,
-                    int(record.coinbase),
-                    record.coin.puzzle_hash,
-                    record.coin.parent_coin_info,
-                    uint64(record.coin.amount).stream_to_bytes(),
-                    record.timestamp,
-                )
-            )
-        if len(values2) > 0:
-            async with self.db_wrapper.writer_maybe_transaction() as conn:
-                await conn.executemany(
-                    "INSERT INTO coin_record VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-                    values2,
-                )
+        return coin_changes
 
     # Update coin_record to be spent in DB
     async def _set_spent(self, coin_names: list[bytes32], index: uint32) -> None:
@@ -630,3 +605,12 @@ class CoinStore:
                 return UnspentLineageInfo(
                     coin_id=bytes32(coin_id), parent_id=bytes32(parent_id), parent_parent_id=bytes32(parent_parent_id)
                 )
+
+    async def is_empty(self) -> bool:
+        """
+        Returns True if the coin store is empty, False otherwise.
+        """
+        async with self.db_wrapper.reader_no_transaction() as conn:
+            async with conn.execute("SELECT coin_name FROM coin_record LIMIT 1") as cursor:
+                row = await cursor.fetchone()
+                return row is None or len(row) == 0

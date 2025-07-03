@@ -6,11 +6,14 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Optional, cast
 
-from chia_rs import AugSchemeMPL, G1Element, G2Element, ProofOfSpace
+from chia_rs import AugSchemeMPL, G1Element, G2Element, PlotSize, ProofOfSpace
 from chia_rs.sized_bytes import bytes32
 from chia_rs.sized_ints import uint8, uint32, uint64
 
-from chia.consensus.pot_iterations import calculate_iterations_quality, calculate_sp_interval_iters
+from chia.consensus.pot_iterations import (
+    calculate_iterations_quality,
+    calculate_sp_interval_iters,
+)
 from chia.harvester.harvester import Harvester
 from chia.plotting.util import PlotInfo, parse_plot_info
 from chia.protocols import harvester_protocol
@@ -22,6 +25,7 @@ from chia.server.api_protocol import ApiMetadata
 from chia.server.ws_connection import WSChiaConnection
 from chia.types.blockchain_format.proof_of_space import (
     calculate_pos_challenge,
+    calculate_prefix_bits,
     generate_plot_public_key,
     passes_plot_filter,
 )
@@ -143,12 +147,15 @@ class HarvesterAPI:
 
                     # Found proofs of space (on average 1 is expected per plot)
                     for index, quality_str in enumerate(quality_strings):
+                        # TODO: todo_v2_plots
                         required_iters: uint64 = calculate_iterations_quality(
-                            self.harvester.constants.DIFFICULTY_CONSTANT_FACTOR,
+                            self.harvester.constants,
                             quality_str,
-                            plot_info.prover.get_size(),
+                            PlotSize.make_v1(plot_info.prover.get_size()),
                             difficulty,
                             new_challenge.sp_hash,
+                            sub_slot_iters,
+                            new_challenge.last_tx_height,
                         )
                         sp_interval_iters = calculate_sp_interval_iters(self.harvester.constants, sub_slot_iters)
                         if required_iters < sp_interval_iters:
@@ -242,8 +249,17 @@ class HarvesterAPI:
                 # Passes the plot filter (does not check sp filter yet though, since we have not reached sp)
                 # This is being executed at the beginning of the slot
                 total += 1
+
+                # TODO: todo_v2_plots support v2 plots in PlotManager
+                filter_prefix_bits = uint8(
+                    calculate_prefix_bits(
+                        self.harvester.constants,
+                        new_challenge.peak_height,
+                        PlotSize.make_v1(try_plot_info.prover.get_size()),
+                    )
+                )
                 if passes_plot_filter(
-                    new_challenge.filter_prefix_bits,
+                    filter_prefix_bits,
                     try_plot_info.prover.get_id(),
                     new_challenge.challenge_hash,
                     new_challenge.sp_hash,
